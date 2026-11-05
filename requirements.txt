@@ -1,0 +1,11 @@
+telethon>=1.36
+cryptg>=0.4
+python-socks[asyncio]>=2.4
+qrcode>=7.4
+customtkinter>=5.2
+pystray>=0.19
+pillow>=10.0
+anthropic>=1.11
+google-genai>=1.0
+openai>=1.66
+certifi

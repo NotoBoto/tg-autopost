@@ -1,0 +1,36 @@
+# Секреты и личные данные — НЕ заливать
+config.json
+*.session
+*.session-journal
+prompt*.txt
+!prompt_text.example.txt
+!prompt_image.example.txt
+.env
+_builtin_api.py
+
+# Рабочие файлы программы
+log.txt
+*.log
+drafts.json
+*.tmp
+drafts/
+_system_prompt*.txt
+_image_work*/
+_agy_workspace*/
+_codex_workspace*/
+
+# Свои картинки (папка остаётся пустой)
+images/*
+!images/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Сборка (python build.py)
+build/
+dist/
+
+.pytest_cache/

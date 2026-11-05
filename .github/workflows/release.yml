@@ -1,0 +1,63 @@
+# Релиз: git tag v0.1.0 && git push origin v0.1.0
+# Собирает установщик на Windows и публикует его в GitHub Releases —
+# оттуда его скачивают люди и берёт автообновление программы.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:   # ручная проверка сборки без публикации
+
+permissions:
+  contents: write
+
+env:
+  PYTHONUTF8: "1"   # русский текст в выводе сборки
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Версия в core.py совпадает с тегом
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          code=$(python -c "import ast,re; print(re.search(r'^VERSION = \"(.+)\"', open('core.py', encoding='utf-8').read(), re.M).group(1))")
+          tag="${GITHUB_REF_NAME#v}"
+          echo "core.VERSION=$code tag=$tag"
+          test "$code" = "$tag" || { echo "::error::VERSION в core.py ($code) не совпадает с тегом ($tag)"; exit 1; }
+
+      - name: Зависимости
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Сборка
+        run: python build.py
+        env:   # встроенный ключ Telegram: Settings → Secrets and variables → Actions
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: setup
+          path: dist/*-Setup.exe
+
+      - name: Публикация релиза
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*-Setup.exe \
+            --title "TG Автопостер ${GITHUB_REF_NAME}" \
+            --notes-file RELEASE_NOTES.md
