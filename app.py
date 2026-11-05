@@ -27,11 +27,12 @@ import updater
 import schedule as sched
 from core import BASE
 from drafts import CANCELLED, PUBLISHED, REVIEW, Draft, DraftStore
-from engine import Engine
+from engine import Engine, short
 
 GREEN, GREEN_HOVER = "#2e9e5b", "#257f49"
 GRAY, GRAY_HOVER = ("#9aa0a6", "#4a4d52"), ("#80868b", "#5f6368")
 RED = "#d9534f"
+ORANGE = "#e0a030"
 STATUS = {
     "stopped": ("Остановлен", "#9aa0a6"),
     "connecting": ("Подключаюсь…", "#f0ad4e"),
@@ -644,7 +645,8 @@ class App(ctk.CTk):
         self.store = DraftStore()
         for d in self.store.list():   # генерацию прервали выходом — пусть человек решит, что делать
             if d.status == REVIEW and not d.text.strip() and not d.error:
-                d.error = "Генерация прервалась (программу закрыли) — нажмите «Написать заново»"
+                d.error = "Генерация прервалась (программу закрыли) — нажмите «↻ Повторить сейчас» вверху"
+                d.retry_op = d.retry_op or "draft"
         self.engines: dict[str, Engine] = {p["id"]: Engine(p, self.store) for p in self.conf["profiles"]}
         self.update_show_names()
         self.vars: dict[str, ctk.StringVar] = {}
@@ -658,6 +660,8 @@ class App(ctk.CTk):
         self.published_count = 0
         self.status = "stopped"   # общий статус; нужен сразу — меню трея читает его из своего потока
         self._save_job = None
+        self._pick_job = None
+        self.text_edited: set[str] = set()   # черновики с ручными правками текста — запишем в журнал
 
         self.title(core.APP_TITLE)
         self.geometry("1180x800")
@@ -1256,7 +1260,9 @@ class App(ctk.CTk):
                 d = self.store.new(cfg["id"], t, channel)
                 first = first or d.id
                 engine.generate(d.id)
-            log.info("Генерирую посты: %d", len(topics))
+            names = ", ".join(f"«{short(t, 40)}»" for t in topics[:5]) + (f" и ещё {len(topics) - 5}"
+                                                                          if len(topics) > 5 else "")
+            engine.log.info("Новые темы (%d) для %s: %s", len(topics), engine.channel_title(channel), names)
             self.topics_box.delete("1.0", "end")
             self.update_topics_count()
             self.review_view = REVIEW_VIEWS[0]
@@ -1278,6 +1284,8 @@ class App(ctk.CTk):
         self.bulk_btn = ctk.CTkButton(top, text="🕒  Все готовые — в расписание", width=250,
                                       command=self.schedule_all)
         self.bulk_btn.pack(side="right")
+        self.retry_btn = ctk.CTkButton(top, text="↻  Повторить сейчас", width=200, command=self.retry_all,
+                                       fg_color="#c07a1a", hover_color="#a0640f")
 
         self.review_list = ctk.CTkScrollableFrame(tab, width=270, label_text="")
         self.review_list.grid(row=1, column=0, sticky="ns", padx=(0, 10))
@@ -1356,6 +1364,7 @@ class App(ctk.CTk):
         self.d_progress = ctk.CTkProgressBar(d, mode="indeterminate", height=6)
         self.d_msg = ctk.CTkLabel(d, text="", text_color=RED, anchor="w", justify="left", wraplength=900)
         self.d_msg.grid(row=5, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        d.bind("<Configure>", lambda ev: self.d_msg.configure(wraplength=max(300, ev.width - 30)), add="+")
 
         act = self.actions = ctk.CTkFrame(d, fg_color="transparent")
         act.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(6, 0))
@@ -1404,6 +1413,9 @@ class App(ctk.CTk):
             return "⏳ пишу текст…"
         if d.image_busy:
             return "🎨 рисую картинку…"
+        if d.waiting:
+            at = d.wait_time()
+            return "⏸ лимит" + (f" · продолжу {sched.fmt(at)}" if at else "")
         if d.error:
             return "⚠ " + ("ошибка" if not d.text.strip() else "есть замечание")
         if d.status == CANCELLED:
@@ -1437,6 +1449,7 @@ class App(ctk.CTk):
             b.pack(fill="x", pady=3)
             b._text_label.configure(wraplength=235, justify="left")
         self.bulk_btn.configure(state="normal" if self.review_view == REVIEW_VIEWS[0] and drafts else "disabled")
+        self.update_retry_btn()
         self.title(f"({n_review}) {core.APP_TITLE}" if n_review else core.APP_TITLE)
         self.update_tray()
         d = self.current()
@@ -1492,9 +1505,9 @@ class App(ctk.CTk):
             problem = e.publish_problem(d) if d.status == REVIEW and d.text.strip() else ""
             msg = "\n".join(x for x in (d.error, problem) if x)
             if not msg and d.status == REVIEW and e.status != "running":
-                msg, color = "Telegram не подключён — опубликовать можно после «▶ Запустить»", "#e0a030"
+                msg, color = "Telegram не подключён — опубликовать можно после «▶ Запустить»", ORANGE
             else:
-                color = RED
+                color = ORANGE if d.waiting else RED
             self.d_msg.configure(text=msg, text_color=color)
         review = d.status == REVIEW
         st = "disabled" if d.text_busy or not review else "normal"
@@ -1556,8 +1569,12 @@ class App(ctk.CTk):
         d = self.current()
         if not d or self.text_did != d.id or d.text_busy:
             return
-        d.text = self.text_box.get("1.0", "end-1c")
+        text = self.text_box.get("1.0", "end-1c")
+        if text == d.text:   # стрелки, выделение, копирование — не правка
+            return
+        d.text = text
         self.shown_text[d.id] = d.text
+        self.text_edited.add(d.id)
         self.update_count(d)
         if self._save_job:
             self.after_cancel(self._save_job)
@@ -1571,6 +1588,13 @@ class App(ctk.CTk):
             if text != d.text:
                 d.text = text
                 self.shown_text[d.id] = text
+                self.text_edited.add(d.id)
+        for did in list(self.text_edited):
+            x = self.store.get(did)
+            if x and self.owner(x):
+                self.owner(x).log.info("✎ «%s»: текст поправлен вручную (%d знаков)", short(x.topic, 60),
+                                       core.post_length(x.text, self.owner(x).cfg))
+        self.text_edited.clear()
         if self._save_job:
             self.after_cancel(self._save_job)
             self._save_job = None
@@ -1614,7 +1638,17 @@ class App(ctk.CTk):
         i = d.images.index(d.image) if d.image in d.images else len(d.images) - 1
         d.image = d.images[(i + delta) % len(d.images)]
         self.store.save()
+        # Листание — частое действие: запишем выбор, когда человек остановится
+        if self._pick_job:
+            self.after_cancel(self._pick_job)
+        self._pick_job = self.after(1500, lambda: self.log_image_pick(d))
         self.show_draft(d)
+
+    def log_image_pick(self, d: Draft):
+        self._pick_job = None
+        if d.image in d.images and self.owner(d):
+            self.owner(d).log.info("🖼 «%s»: выбран вариант картинки %d из %d", short(d.topic, 60),
+                                   d.images.index(d.image) + 1, len(d.images))
 
     def choose_image(self):
         d = self.current()
@@ -1629,6 +1663,11 @@ class App(ctk.CTk):
         shutil.copy(f, dst)
         d.images.append(str(dst))
         d.image, d.image_source = str(dst), "своя"
+        if d.retry_op == "image":   # ждали картинку от нейросети — своя её заменила
+            d.clear_retry()
+            d.error = ""
+        self.owner(d).log.info("🖼 «%s»: поставлена своя картинка %s (вариант %d)", short(d.topic, 60),
+                               Path(f).name, len(d.images))
         self.store.save()
         self.show_draft(d)
 
@@ -1636,6 +1675,10 @@ class App(ctk.CTk):
         d = self.current()
         if d:
             d.image = ""
+            if d.retry_op == "image":
+                d.clear_retry()
+                d.error = ""
+            self.owner(d).log.info("🖼 «%s»: пост без картинки", short(d.topic, 60))
             self.store.save()
             self.show_draft(d)
 
@@ -1669,8 +1712,9 @@ class App(ctk.CTk):
         if not d:
             return
         name = self.chan_labels(self.owner(d).cfg).get(label)
-        if name:
+        if name and name != d.channel:
             d.channel = name
+            self.owner(d).log.info("«%s»: канал — %s", short(d.topic, 60), self.owner(d).channel_title(name))
             self.store.save()
             self.show_draft(d)
 
@@ -1769,7 +1813,30 @@ class App(ctk.CTk):
         for d, at in plan:
             self.reserved[d.id] = (d.channel, at)
             self.owner(d).publish(d.id, at)
-        log.info("В отложенные: %d постов", len(plan))
+        log.info("🕒 Все готовые — в расписание: %d %s, с %s по %s", len(plan),
+                 "пост" if len(plan) == 1 else "поста" if len(plan) < 5 else "постов",
+                 sched.fmt(plan[0][1]), sched.fmt(plan[-1][1]))
+
+    def retry_items(self) -> list[Draft]:
+        return [d for d in self.store.list(REVIEW) if d.retry_op and not d.busy]
+
+    def update_retry_btn(self):
+        n = len(self.retry_items())
+        if n and self.review_view == REVIEW_VIEWS[0]:
+            self.retry_btn.configure(text=f"↻  Повторить сейчас ({n})")
+            if not self.retry_btn.winfo_ismapped():
+                self.retry_btn.pack(side="right", padx=(0, 8))
+        elif self.retry_btn.winfo_ismapped():
+            self.retry_btn.pack_forget()
+
+    def retry_all(self):
+        self.flush_text()
+        items = self.retry_items()
+        if not items:
+            return
+        for pid in {d.profile for d in items}:
+            if pid in self.engines:
+                self.engines[pid].retry_all()
 
     def cancel_draft(self):
         d = self.current()
@@ -1787,6 +1854,8 @@ class App(ctk.CTk):
     def delete_draft(self):
         d = self.current()
         if d and messagebox.askyesno("Удалить", f"Удалить черновик «{d.topic[:60]}» вместе с картинками?"):
+            if self.owner(d):
+                self.owner(d).log.info("🗑 «%s»: черновик удалён", short(d.topic, 60))
             self.store.delete(d.id)
             self.selected = None
             self.render_review()
@@ -3047,6 +3116,7 @@ class App(ctk.CTk):
             if d and d.id in ids:
                 self.show_draft(d)
             self.update_tray()
+            self.update_retry_btn()
         else:
             self.render_review()
         if self.tabs.get() == "Опубликовано":

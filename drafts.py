@@ -43,6 +43,13 @@ class Draft:
     msg_ids: list[int] = field(default_factory=list)   # сообщения в Telegram (картинка и текст отдельно — два)
     chat_id: int = 0
     link: str = ""
+    # Что повторить, если генерация не удалась: «draft» (текст, потом картинка), «text», «image».
+    # wait_until задан — упёрлись в лимит нейросети, движок сам повторит в это время (ISO);
+    # пусто — обычная ошибка, повторит кнопка «Повторить с ошибками».
+    retry_op: str = ""
+    retry_wish: str = ""
+    retry_edit: bool = False
+    wait_until: str = ""
     # Во время работы, на диск не пишутся
     text_busy: bool = False
     image_busy: bool = False
@@ -60,6 +67,21 @@ class Draft:
     @property
     def folder(self) -> Path:
         return DRAFTS_DIR / self.id
+
+    @property
+    def waiting(self) -> bool:
+        """Ждёт сброса лимита нейросети."""
+        return bool(self.retry_op and self.wait_until)
+
+    def wait_time(self) -> datetime | None:
+        try:
+            return datetime.fromisoformat(self.wait_until) if self.wait_until else None
+        except ValueError:
+            return None
+
+    def clear_retry(self):
+        self.retry_op = self.retry_wish = self.wait_until = ""
+        self.retry_edit = False
 
     def when(self) -> datetime | None:
         try:

@@ -88,6 +88,7 @@ def main():
         "--add-data", f"{ROOT / 'assets' / 'notify.wav'}{sep}assets",
         "--collect-data", "customtkinter",      # темы и шрифты customtkinter
         "--hidden-import", "pystray._win32",    # pystray выбирает бэкенд при запуске
+        "--collect-data", "tzdata",             # часовые пояса: «resets 3pm (Europe/Moscow)» от Claude Code
         "--hidden-import", "cryptg",            # Telethon ищет его при запуске; без него шифрует медленно
         str(ROOT / "app.py"),
     ], check=True)

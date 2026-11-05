@@ -15,6 +15,7 @@ from PIL import Image
 
 from core import (ASPECTS, BASE, CODEX_DIR, IMAGE_BACKEND_NAMES, NO_WINDOW, ZAI_URL, cli_env, compat_client,
                   decode_any, find_codex, gemini_key, list_images, openai_key, zai_key)
+from limits import LimitHit
 
 ZAI_SIZES = {"square": "1024x1024", "landscape": "1344x768", "portrait": "768x1344"}
 # Codex: лишнее для одной картинки отключаем, генерацию — нет
@@ -254,11 +255,12 @@ class ImageGen:
                        and p.stat().st_mtime >= started), key=lambda p: p.stat().st_mtime)
         if made:
             return made[-1].read_bytes()
-        msg = (decode_any(err) + decode_any(out)).lower()
+        raw = decode_any(err) + decode_any(out)
+        msg = raw.lower()
         if "not logged in" in msg or "401 unauthorized" in msg:
             raise RuntimeError("не выполнен вход в ChatGPT — «Настройки» → «Картинка» → «Войти в ChatGPT»")
         if "usage limit" in msg or "rate limit" in msg:
-            raise RuntimeError("исчерпан лимит подписки ChatGPT — подождите сброса")
+            raise LimitHit("исчерпан лимит подписки ChatGPT", raw=raw[-1500:])
         raise RuntimeError("Codex не создал картинку. Похоже, генерация картинок в Codex недоступна для "
                            "вашего тарифа ChatGPT (на бесплатном её нет) — выберите в «Настройках» → «Картинка» "
                            "OpenAI API или Gemini API" + (f". Ответ Codex: {answer[:200]}" if answer else ""))

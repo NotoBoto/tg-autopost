@@ -40,7 +40,7 @@ jobs:
 
       - name: Проверка — модули импортируются, тесты проходят
         run: |
-          python -c "import core, drafts, schedule, textgen, imagegen, engine, updater, app"
+          python -c "import core, drafts, schedule, limits, textgen, imagegen, engine, updater, app"
           python -m pytest -q tests
 
       - name: Inno Setup

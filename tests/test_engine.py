@@ -137,11 +137,11 @@ def test_generation_pipeline(env, monkeypatch):
     monkeypatch.setattr(e.image_gen, "generate", fake_image)
     e.cfg["image_backend"] = "openai_api"
     d = store.new("p1", "Кофе", "mychan")
-    run(e, e._gen_text(d))
+    run(e, e._gen_text(d, "draft", "", False, False))
     assert d.text == "Заголовок\nкоротко" and "сократи до 100" in calls[1]
-    run(e, e._gen_image(d, "ярче"))
+    run(e, e._gen_image(d, "image", "ярче", False, False))
     assert d.image_path and d.images == [d.image] and "ярче" in calls[2] and "Кофе" in calls[2]
-    run(e, e._gen_image(d, "темнее", edit=True))
+    run(e, e._gen_image(d, "image", "темнее", True, False))
     assert len(d.images) == 2 and "темнее" in calls[3]
 
 

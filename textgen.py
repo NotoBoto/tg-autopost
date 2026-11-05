@@ -15,6 +15,7 @@ from core import (AGY_AGENT, API_MODELS, BASE, CODEX_FEATURES_OFF, GEMINI_API_DE
                   compat_connection_hint, decode_any, find_agy, find_claude, find_codex, gemini_key,
                   openai_key, strip_reasoning, zai_busy, zai_client, zai_error, zai_error_text, zai_extra,
                   zai_key, zai_lock, zai_models_order, zai_thinking_rejected)
+from limits import LimitHit
 
 
 class TextGen:
@@ -223,7 +224,7 @@ class TextGen:
             if "not logged in" in low or "401 unauthorized" in low:
                 raise RuntimeError("Не выполнен вход в ChatGPT — «Настройки» → «Войти в ChatGPT»")
             if "usage limit" in low or "rate limit" in low:
-                raise RuntimeError("Исчерпан лимит подписки ChatGPT для Codex — подождите сброса")
+                raise LimitHit("Исчерпан лимит подписки ChatGPT для Codex", raw=msg[-1500:])
             lines = [l for l in msg.splitlines() if "error" in l.lower()]
             raise RuntimeError("Codex: " + (lines[-1] if lines else msg[-400:] or f"код выхода {proc.returncode}"))
         return text
