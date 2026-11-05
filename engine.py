@@ -39,6 +39,17 @@ class ProfileLog(logging.LoggerAdapter):
         return (f"[{e.cfg['name']}] {msg}" if e.show_name else msg), kwargs
 
 
+
+def wait_text(sec: int) -> str:
+    """«40 с», «3 мин», «2 ч 5 мин» — сколько ждать по FloodWait."""
+    if sec < 60:
+        return f"{sec} с"
+    if sec < 3600:
+        return f"{(sec + 59) // 60} мин"
+    h, m = divmod((sec + 59) // 60, 60)
+    return f"{h} ч {m} мин" if m else f"{h} ч"
+
+
 class Engine:
     def __init__(self, cfg: dict, store: DraftStore):
         self.cfg, self.store = cfg, store
@@ -164,7 +175,7 @@ class Engine:
             except API_KEY_ERRORS:
                 self._emit("login_error", api_key_error(self.cfg))
             except Exception as e:
-                self._emit("login_error", f"Не удалось отправить код: {e}")
+                self._login_error(f"Не удалось отправить код: {e}")
         self._submit(go())
 
     def sign_in_code(self, code: str):
@@ -174,21 +185,46 @@ class Engine:
             except errors.SessionPasswordNeededError:
                 self._emit("password_needed")
                 return
+            except errors.FloodWaitError as e:
+                self._login_error(f"Слишком много попыток — Telegram просит подождать {wait_text(e.seconds)}.")
+                return
             except Exception as e:
-                self._emit("login_error", f"Код не подошёл: {e}")
+                self._login_error(f"Код не подошёл: {e}")
                 return
             await self._after_login()
         self._submit(go())
 
     def sign_in_password(self, password: str):
         async def go():
+            if not self.client:
+                return
+            # Без молчаливого ожидания: если Telegram просит подождать, скажем об этом сразу,
+            # иначе окно «зависает» на секунды, а повторные нажатия копят новые попытки
+            threshold = self.client.flood_sleep_threshold
+            self.client.flood_sleep_threshold = 0
             try:
                 await self.client.sign_in(password=password)
-            except Exception as e:
-                self._emit("login_error", f"Пароль не подошёл: {e}")
+            except errors.PasswordHashInvalidError:
+                self._login_error("Неверный облачный пароль. Это пароль двухэтапной аутентификации "
+                                  "Telegram, не код из SMS. Забыли — Telegram → Настройки → "
+                                  "Конфиденциальность → Облачный пароль.")
                 return
+            except errors.FloodWaitError as e:
+                self._login_error(f"Слишком много попыток — Telegram просит подождать {wait_text(e.seconds)} "
+                                  "и попробовать снова.")
+                return
+            except Exception as e:
+                self._login_error(f"Пароль не подошёл: {e}")
+                return
+            finally:
+                if self.client:
+                    self.client.flood_sleep_threshold = threshold
             await self._after_login()
-        self._submit(go())
+        return self._submit(go())
+
+    def _login_error(self, text: str):
+        self.log.warning("Вход в Telegram: %s", text)
+        self._emit("login_error", text)
 
     def start_qr(self):
         async def go():

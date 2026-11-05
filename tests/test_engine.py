@@ -143,3 +143,57 @@ def test_generation_pipeline(env, monkeypatch):
     assert d.image_path and d.images == [d.image] and "ярче" in calls[2] and "Кофе" in calls[2]
     run(e, e._gen_image(d, "темнее", edit=True))
     assert len(d.images) == 2 and "темнее" in calls[3]
+
+
+class LoginClient:
+    """Клиент на этапе облачного пароля: sign_in бросает заданную ошибку или пускает."""
+    def __init__(self, error=None):
+        self.error, self.flood_sleep_threshold, self.seen_threshold = error, 60, None
+
+    async def sign_in(self, password=None):
+        self.seen_threshold = self.flood_sleep_threshold
+        if self.error:
+            raise self.error
+
+    async def get_me(self):
+        return SimpleNamespace(first_name="Аня", premium=False)
+
+    async def disconnect(self):
+        pass
+
+
+def login_events(e, error):
+    from telethon import errors
+    e.targets.clear()
+    e.client = LoginClient(error)
+    e.cfg["channels"] = []
+    e.sign_in_password("секрет").result(5)
+    got = []
+    while not e.events.empty():
+        got.append(e.events.get())
+    return e.client, got, errors
+
+
+def test_password_wrong_is_reported(env):
+    from telethon import errors
+    e, _, _ = env
+    client, got, _ = login_events(e, errors.PasswordHashInvalidError(request=None))
+    texts = [d for k, d in got if k == "login_error"]
+    assert texts and "Неверный облачный пароль" in texts[0]
+    assert client.seen_threshold == 0 and client.flood_sleep_threshold == 60   # не ждём молча, порог вернули
+
+
+def test_password_flood_wait_is_reported(env):
+    from telethon import errors
+    e, _, _ = env
+    _, got, _ = login_events(e, errors.FloodWaitError(request=None, capture=125))
+    texts = [d for k, d in got if k == "login_error"]
+    assert texts and "подождать 3 мин" in texts[0]
+
+
+def test_password_ok_logs_in(env):
+    e, _, _ = env
+    e.running = False
+    _, got, _ = login_events(e, None)
+    assert ("me", "Аня") in got and ("status", "running") in got
+    e.loop.call_soon_threadsafe(e._refresh_task.cancel)
