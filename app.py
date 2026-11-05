@@ -1387,7 +1387,8 @@ class App(ctk.CTk):
 
     def on_review_view(self, value):
         self.flush_text()
-        self.review_view = value
+        # На кнопках — с количеством: «На проверке (2)»
+        self.review_view = next((v for v in REVIEW_VIEWS if value.startswith(v)), REVIEW_VIEWS[0])
         self.selected = None
         self.render_review()
 
