@@ -8,6 +8,8 @@
   published  — опубликован
   cancelled  — отменён (можно вернуть на проверку)
 """
+from __future__ import annotations
+
 import json
 import secrets
 import shutil

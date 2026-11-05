@@ -19,7 +19,7 @@ from pathlib import Path
 
 from telethon import errors
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 REPO = "NotoBoto/tg-autopost"   # отсюда берутся обновления (GitHub Releases)
 APP_TITLE = "TG Автопостер"
 

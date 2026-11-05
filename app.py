@@ -218,19 +218,27 @@ def single_instance() -> socket.socket | None | bool:
 #  Значок в трее
 # ======================================================================
 
-APP_COLOR = "#2b7bd0"   # цвет значка программы (assets/icon.ico рисуется из tray_image)
+APP_COLOR = "#7b4fd6"   # цвет значка программы (assets/icon.ico рисуется из tray_image: python -c "import app; app.make_icon()")
 
 
 def tray_image(color: str, size: int = 64) -> Image.Image:
-    """Бумажный самолётик на круге цвета статуса."""
+    """Белый бумажный самолётик на скруглённом квадрате цвета статуса.
+    Квадрат, а не круг, — чтобы не путать с TG Автокомментатором."""
     from PIL import ImageDraw
-    k = size / 64
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    big = size * 4                       # рисуем крупно и уменьшаем — края получаются гладкими
+    k = big / 64
+    img = Image.new("RGBA", (big, big), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    d.ellipse((0, 0, size - 1, size - 1), fill=color)
-    d.polygon([(14 * k, 31 * k), (50 * k, 16 * k), (40 * k, 48 * k), (30 * k, 38 * k)], fill="white")
-    d.polygon([(30 * k, 38 * k), (50 * k, 16 * k), (27 * k, 46 * k)], fill=(225, 232, 240))
-    return img
+    d.rounded_rectangle((0, 0, big - 1, big - 1), radius=int(14 * k), fill=color)
+    d.polygon([(9 * k, 31 * k), (55 * k, 12 * k), (43 * k, 52 * k), (31 * k, 40 * k)], fill="white")
+    d.polygon([(31 * k, 40 * k), (55 * k, 12 * k), (27 * k, 52 * k)], fill=(214, 222, 236))
+    return img.resize((size, size), Image.LANCZOS)
+
+
+def make_icon():
+    """Пересобрать assets/icon.ico из tray_image."""
+    sizes = [16, 24, 32, 48, 64, 128, 256]
+    tray_image(APP_COLOR, 256).save(core.RES / "assets" / "icon.ico", sizes=[(n, n) for n in sizes])
 
 
 class Tray:
